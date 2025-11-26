@@ -48,6 +48,9 @@ class TypeInferenceEngine:
         self._lua_type_inference: LuaTypeInferenceEngine | None = None
         self._js_type_inference: JsTypeInferenceEngine | None = None
 
+        # Tracks attribute names currently being inferred to prevent recursion
+        self._attribute_inference_stack: set[tuple[str, str]] = set()
+
     @property
     def java_type_inference(self) -> JavaTypeInferenceEngine:
         """Lazy-loaded Java type inference engine."""
@@ -987,6 +990,15 @@ class TypeInferenceEngine:
 
     def _infer_attribute_type(self, attribute_name: str, module_qn: str) -> str | None:
         """Infer the type of an instance attribute like self.manager."""
+        cache_key = (module_qn, attribute_name)
+        if cache_key in self._attribute_inference_stack:
+            logger.debug(
+                f"Detected recursive attribute inference for {attribute_name} in {module_qn}"
+            )
+            return None
+
+        self._attribute_inference_stack.add(cache_key)
+
         # Extract the class name from the module_qn
         # module_qn looks like "project.services.user_service" and we need the class context
         # This is challenging because we don't know which class we're currently analyzing
@@ -1025,6 +1037,8 @@ class TypeInferenceEngine:
             logger.debug(
                 f"Failed to analyze instance variables for {attribute_name}: {e}"
             )
+        finally:
+            self._attribute_inference_stack.discard(cache_key)
 
         # Fallback to heuristic-based inference
         if "_" in attribute_name:
